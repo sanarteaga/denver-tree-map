@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Denver Trees</title>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --bg:       #f7f4ef;
+  --surface:  #ffffff;
+  --surface2: #f0ede8;
+  --border:   #ddd9d2;
+  --accent:   #2d6a3f;
+  --acc2:     #4a9960;
+  --text:     #1a2e1e;
+  --dim:      #7a8c7e;
+  --good:     #2d7d4e;
+  --fair:     #c47f17;
+  --poor:     #c0392b;
+  --r:        14px;
+  --sh:       350px;
+  --shadow:   0 2px 16px rgba(0,0,0,.10);
+  --shadow-lg:0 8px 32px rgba(0,0,0,.14);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; height: 100dvh; overflow: hidden; }
+
+/* ── MAP ── */
+#map { position: absolute; inset: 0; z-index: 1; transition: bottom .35s cubic-bezier(.4,0,.2,1); }
+#map.up { bottom: var(--sh); }
+
+/* CARTO Positron — light, clear street names, no referer required */
+
+/* Cluster overrides */
+.marker-cluster-small div, .marker-cluster-medium div, .marker-cluster-large div {
+  background: var(--accent); color: #fff;
+  font-family: 'Space Mono', monospace; font-size: 11px; font-weight: 700;
+}
+.marker-cluster-small  { background: rgba(45,106,63,.18); }
+.marker-cluster-medium { background: rgba(45,106,63,.28); }
+.marker-cluster-large  { background: rgba(45,106,63,.38); }
+
+/* ── ENTRY SCREEN ── */
+#entry-screen {
+  position: absolute; inset: 0; z-index: 200;
+  background: var(--bg);
+  display: flex; flex-direction: column; align-items: center;
+  padding: calc(env(safe-area-inset-top,20px) + 20px) 24px calc(env(safe-area-inset-bottom,20px) + 24px);
+  overflow-y: auto;
+  transition: opacity .35s, transform .35s;
+}
+#entry-screen.gone { opacity: 0; pointer-events: none; transform: translateY(-14px); }
+
+.entry-tree { font-size: 56px; margin-bottom: 6px; animation: sway 3s ease-in-out infinite; }
+@keyframes sway { 0%,100%{transform:rotate(-4deg)} 50%{transform:rotate(4deg)} }
+
+.entry-title {
+  font-family: 'Space Mono', monospace; font-size: 20px; font-weight: 700;
+  color: var(--text); text-align: center; line-height: 1.3; margin-bottom: 6px;
+}
+.entry-sub {
+  font-size: 14px; color: var(--dim); text-align: center;
+  line-height: 1.6; margin-bottom: 28px; max-width: 280px;
+}
+
+/* TAB TOGGLE */
+.tab-row {
+  display: flex; width: 100%; max-width: 340px;
+  background: var(--surface2); border-radius: 12px; padding: 4px;
+  margin-bottom: 20px; gap: 4px;
+}
+.tab-btn {
+  flex: 1; padding: 10px 0; border: none; border-radius: 9px;
+  font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 500;
+  cursor: pointer; transition: all .18s; color: var(--dim); background: transparent;
+}
+.tab-btn.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); font-weight: 600; }
+
+/* PANELS */
+.entry-panel { width: 100%; max-width: 340px; display: none; flex-direction: column; gap: 12px; }
+.entry-panel.show { display: flex; }
+
+/* INPUT */
+.field-wrap {
+  background: var(--surface); border: 1.5px solid var(--border);
+  border-radius: var(--r); display: flex; align-items: center;
+  padding: 0 14px; gap: 10px; transition: border-color .2s;
+}
+.field-wrap:focus-within { border-color: var(--accent); }
+.field-wrap svg { opacity: .35; flex-shrink: 0; }
+#zip-input {
+  flex: 1; background: none; border: none; outline: none; color: var(--text);
+  font-family: 'Space Mono', monospace; font-size: 22px; letter-spacing: .12em; padding: 15px 0;
+}
+#zip-input::placeholder { color: var(--border); }
+
+/* DROPDOWN */
+.select-wrap {
+  position: relative;
+  background: var(--surface); border: 1.5px solid var(--border);
+  border-radius: var(--r); transition: border-color .2s;
+}
+.select-wrap:focus-within { border-color: var(--accent); }
+.select-wrap::after {
+  content: '▾'; position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+  color: var(--dim); pointer-events: none; font-size: 14px;
+}
+#nbr-select {
+  width: 100%; background: none; border: none; outline: none; color: var(--text);
+  font-family: 'DM Sans', sans-serif; font-size: 16px; padding: 15px 40px 15px 14px;
+  appearance: none; -webkit-appearance: none; cursor: pointer;
+}
+#nbr-select option { color: var(--text); background: var(--surface); font-size: 15px; }
+#nbr-select option:disabled { color: var(--dim); }
+
+.go-btn {
+  width: 100%; background: var(--accent); color: #fff; border: none;
+  border-radius: var(--r); padding: 16px; font-family: 'DM Sans', sans-serif;
+  font-size: 16px; font-weight: 600; cursor: pointer; letter-spacing: .01em;
+  transition: opacity .15s, background .15s; box-shadow: var(--shadow);
+}
+.go-btn:disabled { opacity: .38; cursor: default; box-shadow: none; }
+.go-btn:not(:disabled):active { background: #1f4d2d; }
+
+.entry-err {
+  font-size: 13px; color: var(--poor); font-family: 'Space Mono', monospace;
+  text-align: center; min-height: 16px; line-height: 1.5;
+}
+
+/* ── LOADING OVERLAY ── */
+#loading {
+  position: absolute; inset: 0; z-index: 150;
+  background: rgba(247,244,239,.94);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  transition: opacity .35s;
+}
+#loading.gone { opacity: 0; pointer-events: none; }
+.load-label { font-family: 'Space Mono', monospace; font-size: 17px; color: var(--accent); font-weight: 700; letter-spacing: .06em; }
+#lmsg { font-family: 'DM Sans', sans-serif; font-size: 14px; color: var(--dim); text-align: center; max-width: 240px; line-height: 1.7; }
+.pbar-wrap { width: 200px; height: 4px; background: var(--border); border-radius: 99px; overflow: hidden; }
+#pbar { height: 100%; background: var(--accent); border-radius: 99px; width: 0%; transition: width .35s; }
+
+/* ── HEADER ── */
+#hdr {
+  position: absolute; top: env(safe-area-inset-top, 14px); left: 12px; right: 12px;
+  z-index: 20; display: flex; gap: 8px; align-items: center;
+}
+#sw {
+  flex: 1; background: rgba(255,255,255,.93); border: 1px solid var(--border);
+  border-radius: var(--r); display: flex; align-items: center; padding: 0 12px; gap: 8px;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+}
+#sw svg { opacity: .4; flex-shrink: 0; }
+#si {
+  flex: 1; background: none; border: none; outline: none; color: var(--text);
+  font-family: 'DM Sans', sans-serif; font-size: 16px; padding: 12px 0;
+}
+#si::placeholder { color: var(--dim); }
+#clr { background: none; border: none; color: var(--dim); font-size: 17px; cursor: pointer; padding: 2px 0; display: none; }
+
+#fbtn {
+  background: rgba(255,255,255,.93); border: 1px solid var(--border); border-radius: var(--r);
+  color: var(--text); width: 46px; height: 46px; display: flex; align-items: center;
+  justify-content: center; cursor: pointer; font-size: 19px; flex-shrink: 0;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: var(--shadow);
+}
+
+/* ── AREA BAR ── */
+#area-bar {
+  position: absolute; top: calc(env(safe-area-inset-top, 14px) + 58px); left: 12px;
+  z-index: 20; display: flex; align-items: center; gap: 6px; pointer-events: none;
+}
+#stat {
+  background: rgba(255,255,255,.93); border: 1px solid var(--border); border-radius: 99px;
+  padding: 5px 12px; font-family: 'Space Mono', monospace; font-size: 11px; color: var(--dim);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  box-shadow: var(--shadow); white-space: nowrap;
+}
+#stat b { color: var(--accent); font-weight: 700; }
+#change-area {
+  background: rgba(255,255,255,.93); border: 1px solid var(--accent); border-radius: 99px;
+  padding: 5px 12px; font-family: 'Space Mono', monospace; font-size: 11px; color: var(--accent);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); cursor: pointer;
+  box-shadow: var(--shadow); white-space: nowrap; pointer-events: all;
+}
+
+/* ── LOCATE ── */
+#loc {
+  position: absolute; right: 16px; z-index: 20;
+  bottom: calc(env(safe-area-inset-bottom, 14px) + 16px);
+  background: rgba(255,255,255,.93); border: 1px solid var(--border); border-radius: var(--r);
+  color: var(--text); width: 46px; height: 46px; display: flex; align-items: center;
+  justify-content: center; cursor: pointer; font-size: 22px;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: var(--shadow);
+  transition: bottom .35s cubic-bezier(.4,0,.2,1);
+}
+#loc.up { bottom: calc(var(--sh) + env(safe-area-inset-bottom, 14px) + 16px); }
+
+/* ── OVERLAY ── */
+#ovl { position: absolute; inset: 0; z-index: 25; display: none; background: rgba(0,0,0,.2); }
+#ovl.on { display: block; }
+
+/* ── FILTER SHEET ── */
+#fsh {
+  position: absolute; left: 0; right: 0; bottom: -100%; z-index: 30;
+  background: var(--surface); border-top: 1px solid var(--border);
+  border-radius: 20px 20px 0 0; padding: 0 16px calc(env(safe-area-inset-bottom, 14px) + 16px);
+  transition: bottom .35s cubic-bezier(.4,0,.2,1); max-height: 68dvh; overflow-y: auto;
+  box-shadow: var(--shadow-lg);
+}
+#fsh.on { bottom: 0; }
+
+/* ── DETAIL SHEET ── */
+#dsh {
+  position: absolute; left: 0; right: 0; height: var(--sh); z-index: 20;
+  bottom: calc(-1 * var(--sh));
+  background: var(--surface); border-top: 1px solid var(--border);
+  border-radius: 20px 20px 0 0; padding: 0 16px calc(env(safe-area-inset-bottom, 14px) + 8px);
+  transition: bottom .35s cubic-bezier(.4,0,.2,1); overflow: hidden;
+  box-shadow: var(--shadow-lg);
+}
+#dsh.on { bottom: 0; }
+
+/* SHARED SHEET */
+.handle-wrap { padding: 12px 0 8px; text-align: center; cursor: pointer; }
+.handle { width: 36px; height: 4px; background: var(--border); border-radius: 2px; margin: 0 auto; }
+.slabel {
+  font-family: 'Space Mono', monospace; font-size: 10px; letter-spacing: .08em;
+  color: var(--dim); text-transform: uppercase; margin: 12px 0 8px;
+}
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.chip {
+  padding: 7px 13px; border-radius: 99px; border: 1.5px solid var(--border);
+  font-size: 13px; color: var(--dim); background: var(--surface2); cursor: pointer;
+  transition: all .15s; white-space: nowrap; font-family: 'DM Sans', sans-serif;
+}
+.chip.on { border-color: var(--accent); color: var(--accent); background: rgba(45,106,63,.07); font-weight: 600; }
+#apply {
+  width: 100%; background: var(--accent); color: #fff; border: none;
+  border-radius: var(--r); padding: 14px; font-family: 'DM Sans', sans-serif;
+  font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 14px; box-shadow: var(--shadow);
+}
+
+/* TREE DETAIL */
+#d-icon { font-size: 30px; margin-bottom: 2px; }
+#d-bot  { font-family: 'Space Mono', monospace; font-size: 12px; color: var(--acc2); letter-spacing: .04em; margin-bottom: 2px; }
+#d-com  { font-size: 21px; font-weight: 600; line-height: 1.2; margin-bottom: 12px; }
+.dgrid  { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.dcell  { background: var(--surface2); border-radius: 10px; padding: 10px 12px; }
+.dcell .l { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; font-family: 'Space Mono', monospace; margin-bottom: 3px; }
+.dcell .v { font-size: 15px; font-weight: 600; color: var(--text); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+#d-addr { font-size: 13px; color: var(--dim); display: flex; align-items: flex-start; gap: 6px; margin-top: 2px; }
+#d-addr svg { flex-shrink: 0; margin-top: 1px; }
+
+/* TOAST */
+#toast {
+  position: absolute; bottom: calc(env(safe-area-inset-bottom,14px) + 80px); left: 16px; right: 16px;
+  z-index: 90; background: #333; color: #fff; border-radius: var(--r);
+  padding: 12px 16px; font-size: 13px; text-align: center; line-height: 1.5;
+  opacity: 0; pointer-events: none; transition: opacity .3s;
+}
+#toast.show { opacity: 1; }
+
+/* SPINNER (neighborhood fetch) */
+.spinner {
+  width: 18px; height: 18px; border: 2px solid var(--border);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: spin .7s linear infinite; display: inline-block; vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<!-- ENTRY SCREEN -->
+<div id="entry-screen">
+  <div class="entry-tree">🌳</div>
+  <div class="entry-title">Denver Tree Map</div>
+  <div class="entry-sub">Search by zip code or select a neighborhood to explore every tree in that area</div>
+
+  <!-- TAB TOGGLE -->
+  <div class="tab-row">
+    <button class="tab-btn active" id="tab-zip" onclick="switchTab('zip')">📮 Zip Code</button>
+    <button class="tab-btn" id="tab-nbr" onclick="switchTab('nbr')">🏘 Neighborhood</button>
+  </div>
+
+  <!-- ZIP PANEL -->
+  <div class="entry-panel show" id="panel-zip">
+    <div class="field-wrap">
+      <svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+        <circle cx="12" cy="9" r="2.5"/>
+      </svg>
+      <input id="zip-input" type="tel" inputmode="numeric" maxlength="5" placeholder="80205" autocomplete="postal-code">
+    </div>
+    <button class="go-btn" id="zip-go" disabled>Explore Trees →</button>
+    <div class="entry-err" id="zip-err"></div>
+  </div>
+
+  <!-- NEIGHBORHOOD PANEL -->
+  <div class="entry-panel" id="panel-nbr">
+    <div class="select-wrap">
+      <select id="nbr-select">
+        <option value="" disabled selected>Loading neighborhoods… &nbsp;</option>
+      </select>
+    </div>
+    <button class="go-btn" id="nbr-go" disabled>Explore Trees →</button>
+    <div class="entry-err" id="nbr-err"></div>
+  </div>
+</div>
+
+<!-- LOADING -->
+<div id="loading" class="gone">
+  <div class="load-label" id="load-label">Loading…</div>
+  <div id="lmsg">Fetching data…</div>
+  <div class="pbar-wrap"><div id="pbar"></div></div>
+</div>
+
+<!-- MAP -->
+<div id="map"></div>
+
+<!-- HEADER -->
+<div id="hdr">
+  <div id="sw">
+    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+    </svg>
+    <input id="si" type="search" inputmode="search" placeholder="Search species…" autocomplete="off" autocorrect="off" spellcheck="false">
+    <button id="clr">✕</button>
+  </div>
+  <button id="fbtn">⚙︎</button>
+</div>
+
+<!-- AREA BAR -->
+<div id="area-bar">
+  <div id="stat">Showing <b id="sc">–</b> trees</div>
+  <button id="change-area">✎ Change area</button>
+</div>
+
+<!-- OVERLAY -->
+<div id="ovl"></div>
+
+<!-- FILTER SHEET -->
+<div id="fsh">
+  <div class="handle-wrap" id="fclose"><div class="handle"></div></div>
+  <div class="slabel">Condition</div>
+  <div class="chips" id="cond-chips"></div>
+  <div class="slabel">Diameter class</div>
+  <div class="chips" id="diam-chips"></div>
+  <button id="apply">Apply Filters</button>
+</div>
+
+<!-- DETAIL SHEET -->
+<div id="dsh">
+  <div class="handle-wrap" id="dclose"><div class="handle"></div></div>
+  <div id="d-icon">🌲</div>
+  <div id="d-bot">–</div>
+  <div id="d-com">–</div>
+  <div class="dgrid">
+    <div class="dcell"><div class="l">Condition</div><div class="v" id="d-cond">–</div></div>
+    <div class="dcell"><div class="l">Diameter</div><div class="v" id="d-diam">–</div></div>
+    <div class="dcell"><div class="l">Site type</div><div class="v" id="d-site">–</div></div>
+    <div class="dcell"><div class="l">Stems</div><div class="v" id="d-stem">–</div></div>
+  </div>
+  <div id="d-addr">
+    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+      <circle cx="12" cy="9" r="2.5"/>
+    </svg>
+    <span id="d-atext">–</span>
+  </div>
+</div>
+
+<!-- LOCATE -->
+<button id="loc">◎</button>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<script>
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const TREE_API = 'https://data.colorado.gov/resource/wz8h-dap6.json';
+const GEO_API  = 'https://nominatim.openstreetmap.org/search';
+const LIMIT    = 50000;
+const CENTER   = [39.7392, -104.9903];
+
+// ─── MAP ─────────────────────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: false, attributionControl: true, maxZoom: 19 })
+             .setView(CENTER, 13);
+
+// CARTO Positron: light, clean, excellent street names, no referer requirement
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  maxZoom: 19,
+  subdomains: 'abcd',
+  attribution: '© <a href="https://openstreetmap.org">OSM</a> © <a href="https://carto.com">CARTO</a> | <a href="https://data.colorado.gov">CO Open Data</a>'
+}).addTo(map);
+
+const clusters = L.markerClusterGroup({
+  maxClusterRadius: 50, disableClusteringAtZoom: 17,
+  spiderfyOnMaxZoom: true, chunkedLoading: true,
+  iconCreateFunction(c) {
+    const n = c.getChildCount();
+    const sz = n < 50 ? 'small' : n < 300 ? 'medium' : 'large';
+    const label = n >= 1000 ? (n/1000).toFixed(1)+'k' : n;
+    return L.divIcon({ html:`<div><span>${label}</span></div>`, className:`marker-cluster marker-cluster-${sz}`, iconSize:[40,40] });
+  }
+});
+map.addLayer(clusters);
+
+// ─── ICONS ───────────────────────────────────────────────────────────────────
+function treeIcon(cond) {
+  const c = (cond||'').toLowerCase();
+  const fill = c.includes('excellent')||c.includes('good') ? '#2d7d4e'
+             : c.includes('fair')                          ? '#c47f17'
+             : c.includes('poor')||c.includes('dead')||c.includes('critical') ? '#c0392b'
+             : '#5a8a6a';
+  const stroke = c.includes('excellent')||c.includes('good') ? '#1a5230'
+               : c.includes('fair')                          ? '#8a5a10'
+               : c.includes('poor')||c.includes('dead')||c.includes('critical') ? '#8a1a10'
+               : '#3a6a4a';
+  return L.divIcon({
+    html: `<svg width="22" height="26" viewBox="0 0 22 26">
+      <circle cx="11" cy="11" r="9" fill="${fill}" stroke="${stroke}" stroke-width="1.5" opacity=".9"/>
+      <line x1="11" y1="20" x2="11" y2="26" stroke="${stroke}" stroke-width="2.5" stroke-linecap="round"/>
+    </svg>`,
+    className:'', iconSize:[22,26], iconAnchor:[11,26]
+  });
+}
+function condDot(cond) {
+  const c = (cond||'').toLowerCase();
+  const col = c.includes('excellent')||c.includes('good') ? 'var(--good)'
+            : c.includes('fair')                          ? 'var(--fair)'
+            : c.includes('poor')||c.includes('dead')||c.includes('critical') ? 'var(--poor)'
+            : 'var(--dim)';
+  return `<span class="dot" style="background:${col}"></span>${cond||'—'}`;
+}
+
+// ─── STATE ───────────────────────────────────────────────────────────────────
+let allTrees = [], activeConds = new Set(), activeDiam = null, searchQ = '';
+
+// ─── TAB SWITCHING ───────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.getElementById('tab-zip').classList.toggle('active', tab==='zip');
+  document.getElementById('tab-nbr').classList.toggle('active', tab==='nbr');
+  document.getElementById('panel-zip').classList.toggle('show', tab==='zip');
+  document.getElementById('panel-nbr').classList.toggle('show', tab==='nbr');
+  document.getElementById('zip-err').textContent = '';
+  document.getElementById('nbr-err').textContent = '';
+  if (tab==='zip') setTimeout(() => document.getElementById('zip-input').focus(), 100);
+}
+
+// ─── FETCH NEIGHBORHOODS (lightweight — runs at startup) ──────────────────
+async function loadNeighborhoods() {
+  try {
+    const url = `${TREE_API}?$select=neighbor&$where=neighbor IS NOT NULL&$group=neighbor&$order=neighbor ASC&$limit=200`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+    const sel = document.getElementById('nbr-select');
+    sel.innerHTML = '<option value="" disabled selected>Select a neighborhood…</option>';
+    for (const row of data) {
+      if (!row.neighbor || row.neighbor.trim()==='') continue;
+      const opt = document.createElement('option');
+      opt.value = row.neighbor;
+      opt.textContent = row.neighbor;
+      sel.appendChild(opt);
+    }
+    document.getElementById('nbr-go').disabled = true;
+    sel.addEventListener('change', () => {
+      document.getElementById('nbr-go').disabled = !sel.value;
+      document.getElementById('nbr-err').textContent = '';
+    });
+  } catch(e) {
+    const sel = document.getElementById('nbr-select');
+    sel.innerHTML = '<option value="" disabled selected>Could not load neighborhoods</option>';
+  }
+}
+
+// ─── ZIP LOGIC ───────────────────────────────────────────────────────────────
+const zipInput = document.getElementById('zip-input');
+const zipGo    = document.getElementById('zip-go');
+
+zipInput.addEventListener('input', () => {
+  zipInput.value = zipInput.value.replace(/\D/g,'');
+  zipGo.disabled = zipInput.value.length !== 5;
+  document.getElementById('zip-err').textContent = '';
+});
+zipInput.addEventListener('keydown', e => { if (e.key==='Enter' && !zipGo.disabled) goZip(); });
+zipGo.addEventListener('click', goZip);
+
+async function goZip() {
+  const zip = zipInput.value.trim();
+  if (zip.length !== 5) return;
+  document.getElementById('zip-err').textContent = '';
+  zipGo.disabled = true; zipGo.textContent = '…';
+
+  try {
+    document.getElementById('load-label').textContent = zip;
+    showLoading(true); setProg(10); setMsg('Looking up zip code…');
+    document.getElementById('entry-screen').classList.add('gone');
+
+    const geoUrl = `${GEO_API}?postalcode=${encodeURIComponent(zip)}&country=US&format=json&limit=1`;
+    const geoRes = await fetch(geoUrl, { headers:{'User-Agent':'DenverTreeMap/1.0'} });
+    if (!geoRes.ok) throw new Error(`Geocoder error ${geoRes.status}`);
+    const geoData = await geoRes.json();
+    if (!geoData.length) throw new Error(`Zip code ${zip} not found. Try another.`);
+
+    const [south, north, west, east] = geoData[0].boundingbox.map(parseFloat);
+    const place = geoData[0].display_name.split(',').slice(0,2).join(', ').trim();
+
+    setProg(38); setMsg(`Found: ${place}\nFetching trees…`);
+    await fetchAndShow({ south, north, west, east }, zip);
+
+  } catch(e) {
+    showLoading(false);
+    document.getElementById('entry-screen').classList.remove('gone');
+    document.getElementById('zip-err').textContent = e.message || 'Something went wrong.';
+    zipGo.disabled = false; zipGo.textContent = 'Explore Trees →';
+  }
+}
+
+// ─── NEIGHBORHOOD LOGIC ───────────────────────────────────────────────────
+const nbrSelect = document.getElementById('nbr-select');
+const nbrGo     = document.getElementById('nbr-go');
+
+nbrGo.addEventListener('click', async () => {
+  const nbr = nbrSelect.value;
+  if (!nbr) return;
+  document.getElementById('nbr-err').textContent = '';
+  nbrGo.disabled = true; nbrGo.textContent = '…';
+
+  try {
+    document.getElementById('load-label').textContent = nbr;
+    showLoading(true); setProg(20); setMsg(`Fetching trees in ${nbr}…`);
+    document.getElementById('entry-screen').classList.add('gone');
+
+    // Query by neighborhood name directly — no geocoding needed
+    const where = `neighbor = '${nbr.replace(/'/g,"''")}'`;
+    const url = `${TREE_API}?$limit=${LIMIT}&$select=species_common,species_botanic,diameter,stems,condition,site_designation,address,street,neighbor,x_long,y_lat&$where=${encodeURIComponent(where)}`;
+    setProg(45);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`API error ${res.status}`);
+    const data = await res.json();
+    if (!Array.isArray(data)) throw new Error('Unexpected response');
+    setProg(80); setMsg(`Plotting ${data.length.toLocaleString()} trees…`);
+    allTrees = data;
+    buildChips();
+    await drawMarkers(allTrees);
+    fitToTrees();
+    setProg(100);
+    setTimeout(() => showLoading(false), 350);
+    if (!data.length) showToast(`No trees found in ${nbr}.`);
+
+  } catch(e) {
+    showLoading(false);
+    document.getElementById('entry-screen').classList.remove('gone');
+    document.getElementById('nbr-err').textContent = e.message || 'Something went wrong.';
+    nbrGo.disabled = false; nbrGo.textContent = 'Explore Trees →';
+  }
+});
+
+// ─── SHARED FETCH + SHOW (zip path) ──────────────────────────────────────────
+async function fetchAndShow({ south, north, west, east }, label) {
+  const where = `x_long BETWEEN '${west}' AND '${east}' AND y_lat BETWEEN '${south}' AND '${north}'`;
+  const url = `${TREE_API}?$limit=${LIMIT}&$select=species_common,species_botanic,diameter,stems,condition,site_designation,address,street,neighbor,x_long,y_lat&$where=${encodeURIComponent(where)}`;
+  setProg(55); setMsg('Fetching trees…');
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Tree API error ${res.status}`);
+  const data = await res.json();
+  if (!Array.isArray(data)) throw new Error('Unexpected API response');
+  setProg(82); setMsg(`Plotting ${data.length.toLocaleString()} trees…`);
+  allTrees = data;
+  buildChips();
+  await drawMarkers(allTrees);
+  map.fitBounds([[south, west],[north, east]], { padding:[24,24] });
+  setProg(100);
+  setTimeout(() => showLoading(false), 350);
+  if (!data.length) showToast(`No trees found in ${label}. The dataset may not cover this area.`);
+}
+
+// ─── DRAW ────────────────────────────────────────────────────────────────────
+async function drawMarkers(trees) {
+  clusters.clearLayers();
+  const ms = [];
+  for (const t of trees) {
+    const lat = parseFloat(t.y_lat), lng = parseFloat(t.x_long);
+    if (isNaN(lat)||isNaN(lng)) continue;
+    const m = L.marker([lat,lng], { icon: treeIcon(t.condition) });
+    m.on('click', () => showDetail(t));
+    ms.push(m);
+  }
+  clusters.addLayers(ms);
+  document.getElementById('sc').textContent = ms.length.toLocaleString();
+}
+
+function fitToTrees() {
+  const pts = allTrees.map(t => [parseFloat(t.y_lat), parseFloat(t.x_long)]).filter(([a,b]) => !isNaN(a)&&!isNaN(b));
+  if (pts.length) map.fitBounds(pts, { padding:[32,32] });
+}
+
+// ─── CHANGE AREA ─────────────────────────────────────────────────────────────
+document.getElementById('change-area').addEventListener('click', () => {
+  activeConds.clear(); activeDiam = null; searchQ = '';
+  document.getElementById('si').value = '';
+  document.getElementById('clr').style.display = 'none';
+  closeDetail();
+  zipInput.value = ''; zipGo.disabled = true;
+  zipGo.textContent = 'Explore Trees →';
+  nbrGo.disabled = !nbrSelect.value;
+  nbrGo.textContent = 'Explore Trees →';
+  document.getElementById('zip-err').textContent = '';
+  document.getElementById('nbr-err').textContent = '';
+  document.getElementById('entry-screen').classList.remove('gone');
+  setTimeout(() => document.getElementById('zip-input').focus(), 360);
+});
+
+// ─── DETAIL SHEET ────────────────────────────────────────────────────────────
+const dsh = document.getElementById('dsh');
+const mapEl = document.getElementById('map');
+const locEl = document.getElementById('loc');
+
+function showDetail(t) {
+  const common  = t.species_common  || '—';
+  const botanic = t.species_botanic || '—';
+  const addr    = [t.address, t.street].filter(Boolean).join(' ') || '—';
+  const nbr     = t.neighbor ? ' · '+t.neighbor : '';
+  const cl      = (t.condition||'').toLowerCase();
+  const icons   = {dead:'🪵',poor:'🍂',fair:'🌿',good:'🌳',excellent:'🌲'};
+  let icon = '🌲';
+  for (const [k,v] of Object.entries(icons)) if (cl.includes(k)) { icon=v; break; }
+  document.getElementById('d-icon').textContent  = icon;
+  document.getElementById('d-bot').textContent   = botanic;
+  document.getElementById('d-com').textContent   = common;
+  document.getElementById('d-cond').innerHTML    = condDot(t.condition);
+  document.getElementById('d-diam').textContent  = t.diameter || '—';
+  document.getElementById('d-site').textContent  = t.site_designation || '—';
+  document.getElementById('d-stem').textContent  = t.stems || '—';
+  document.getElementById('d-atext').textContent = addr + nbr;
+  dsh.classList.add('on'); mapEl.classList.add('up'); locEl.classList.add('up');
+}
+function closeDetail() {
+  dsh.classList.remove('on'); mapEl.classList.remove('up'); locEl.classList.remove('up');
+}
+document.getElementById('dclose').addEventListener('click', closeDetail);
+map.on('click', closeDetail);
+let ty0=0;
+dsh.addEventListener('touchstart', e => { ty0=e.touches[0].clientY; }, {passive:true});
+dsh.addEventListener('touchend',   e => { if(e.changedTouches[0].clientY-ty0>55) closeDetail(); }, {passive:true});
+
+// ─── FILTER SHEET ────────────────────────────────────────────────────────────
+const fsh = document.getElementById('fsh'), ovl = document.getElementById('ovl');
+document.getElementById('fbtn').addEventListener('click', () => { fsh.classList.add('on'); ovl.classList.add('on'); });
+function closeFilter() { fsh.classList.remove('on'); ovl.classList.remove('on'); }
+document.getElementById('fclose').addEventListener('click', closeFilter);
+ovl.addEventListener('click', closeFilter);
+document.getElementById('apply').addEventListener('click', () => { closeFilter(); applyFilters(); });
+
+function buildChips() {
+  buildRow('cond-chips', ['Excellent','Good','Fair','Poor','Dead','Critical'], item => {
+    if (activeConds.has(item)) activeConds.delete(item); else activeConds.add(item);
+    return activeConds.has(item);
+  });
+  buildRow('diam-chips', ['0 to 6','6 to 12','12 to 18','18 to 24','24 to 30','30+'], item => {
+    activeDiam = activeDiam===item ? null : item; return activeDiam===item;
+  }, true);
+}
+function buildRow(id, items, toggle, exclusive) {
+  const row=document.getElementById(id); row.innerHTML='';
+  for (const item of items) {
+    const btn=document.createElement('button');
+    btn.className='chip'; btn.textContent=item;
+    btn.addEventListener('click', () => {
+      const isNowOn=toggle(item);
+      if (exclusive) row.querySelectorAll('.chip').forEach(c=>c.classList.remove('on'));
+      btn.classList.toggle('on', isNowOn);
+    });
+    row.appendChild(btn);
+  }
+}
+
+// ─── SEARCH ──────────────────────────────────────────────────────────────────
+let stimer;
+document.getElementById('si').addEventListener('input', function() {
+  searchQ=this.value.trim().toLowerCase();
+  document.getElementById('clr').style.display=searchQ?'block':'none';
+  clearTimeout(stimer); stimer=setTimeout(applyFilters,280);
+});
+document.getElementById('clr').addEventListener('click', () => {
+  document.getElementById('si').value=''; searchQ='';
+  document.getElementById('clr').style.display='none'; applyFilters();
+});
+
+// ─── FILTERS ─────────────────────────────────────────────────────────────────
+function applyFilters() {
+  const filtered = allTrees.filter(t => {
+    if (searchQ) {
+      const hay=((t.species_common||'')+' '+(t.species_botanic||'')+' '+(t.neighbor||'')).toLowerCase();
+      if (!hay.includes(searchQ)) return false;
+    }
+    if (activeConds.size>0) {
+      const c=(t.condition||'').toLowerCase();
+      if (![...activeConds].some(ac=>c.includes(ac.toLowerCase()))) return false;
+    }
+    if (activeDiam) {
+      if (activeDiam==='30+') {
+        const n=parseInt(t.diameter||'0'); if(isNaN(n)||n<30) return false;
+      } else {
+        if (!(t.diameter||'').includes(activeDiam.split(' to ')[0])) return false;
+      }
+    }
+    return true;
+  });
+  drawMarkers(filtered);
+}
+
+// ─── LOCATE ──────────────────────────────────────────────────────────────────
+document.getElementById('loc').addEventListener('click', () => {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(
+    p => map.flyTo([p.coords.latitude,p.coords.longitude], 16, {animate:true,duration:1.2}),
+    null, {enableHighAccuracy:true,timeout:8000}
+  );
+});
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+function showLoading(on) { document.getElementById('loading').classList.toggle('gone',!on); if(on){setProg(0);} }
+function setMsg(m) { document.getElementById('lmsg').textContent=m; }
+function setProg(p) { document.getElementById('pbar').style.width=p+'%'; }
+let toastT;
+function showToast(msg,dur=4000) {
+  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),dur);
+}
+
+// ─── BOOT ────────────────────────────────────────────────────────────────────
+loadNeighborhoods();          // fetch neighborhood list in background
+setTimeout(() => document.getElementById('zip-input').focus(), 500);
+</script>
+</body>
+</html>
