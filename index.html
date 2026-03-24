@@ -912,13 +912,7 @@ function showLocationDot(lat, lng, accuracyM) {
     }).addTo(map);
   }
 
-  // Also draw the 0.5-mile search radius ring so user can see coverage
-  L.circle([lat, lng], {
-    radius: 322,   // 0.2 miles in metres
-    color: '#2d6a3f', weight: 1.5, dashArray: '4 4',
-    fillColor: '#2d6a3f', fillOpacity: 0.04,
-    interactive: false
-  }).addTo(map);
+  // (radius ring removed — was causing green tint on map)
 }
 
 document.getElementById('loc').addEventListener('click', () => {
