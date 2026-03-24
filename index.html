@@ -1008,8 +1008,8 @@ function nearestTree(lat, lng) {
 // Build the speech string from a tree record
 function buildSpeech(t) {
   const name    = t.species_common  || t.species_botanic || 'Unknown species';
-  const diam    = t.diameter        ?  : '';
-  const stems   = t.stems && t.stems !== '1' ?  : '';
+  const diam    = t.diameter ? 'diameter ' + t.diameter + ' inches' : '';
+  const stems   = t.stems && t.stems !== '1' ? t.stems + ' stems' : '';
   const parts   = [name, diam, stems].filter(Boolean);
   return parts.join(', ');
 }
