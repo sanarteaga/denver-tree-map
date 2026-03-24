@@ -397,7 +397,7 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
   <div class="entry-panel" id="panel-gps">
     <div class="gps-card">
       <div class="gps-icon">📍</div>
-      <div class="gps-desc">Load all trees within <strong>0.5 miles</strong> of your current location</div>
+      <div class="gps-desc">Load all trees within <strong>0.2 miles</strong> of your current location</div>
     </div>
     <button class="go-btn" id="gps-go">Use My Location →</button>
     <div class="entry-err" id="gps-err"></div>
@@ -691,7 +691,7 @@ document.getElementById('gps-go').addEventListener('click', () => {
     const lat = pos.coords.latitude;
     const lng = pos.coords.longitude;
 
-    setProg(35); setMsg('Loading trees within 0.5 miles…');
+    setProg(35); setMsg('Loading trees within 0.2 miles…');
 
     // Show location dot straight away
     showLocationDot(lat, lng, pos.coords.accuracy);
@@ -713,7 +713,7 @@ document.getElementById('gps-go').addEventListener('click', () => {
       await drawMarkers(allTrees);
       setProg(100);
       setTimeout(() => showLoading(false), 300);
-      if (!data.length) showToast('No trees found within 0.5 miles of your location.');
+      if (!data.length) showToast('No trees found within 0.2 miles of your location.');
     } catch(e) {
       showLoading(false);
       document.getElementById('entry-screen').classList.remove('gone');
@@ -890,7 +890,7 @@ function applyFilters() {
 
 // ─── GPS LOCATION ────────────────────────────────────────────────────────────
 // 0.5 miles ≈ 0.0072 degrees at Denver's latitude
-const RADIUS_DEG = 0.0072;
+const RADIUS_DEG = 0.0029;  // 0.2 miles
 
 let locationMarker = null;   // pulsing dot layer
 let locationCircle = null;   // accuracy ring
@@ -920,7 +920,7 @@ function showLocationDot(lat, lng, accuracyM) {
 
   // Also draw the 0.5-mile search radius ring so user can see coverage
   L.circle([lat, lng], {
-    radius: 804,   // 0.5 miles in metres
+    radius: 322,   // 0.2 miles in metres
     color: '#2d6a3f', weight: 1.5, dashArray: '4 4',
     fillColor: '#2d6a3f', fillOpacity: 0.04,
     interactive: false
@@ -964,7 +964,7 @@ document.getElementById('loc').addEventListener('click', () => {
       await drawMarkers(allTrees);
       setProg(100);
       setTimeout(() => showLoading(false), 300);
-      if (!data.length) showToast('No trees found within 0.5 miles of your location.');
+      if (!data.length) showToast('No trees found within 0.2 miles of your location.');
     } catch(e) {
       showLoading(false);
       showToast('Could not load trees: ' + e.message);
@@ -1007,11 +1007,15 @@ function nearestTree(lat, lng) {
 
 // Build the speech string from a tree record
 function buildSpeech(t) {
-  const name    = t.species_common  || t.species_botanic || 'Unknown species';
-  const diam    = t.diameter ? 'diameter ' + t.diameter + ' inches' : '';
-  const stems   = t.stems && t.stems !== '1' ? t.stems + ' stems' : '';
-  const parts   = [name, diam, stems].filter(Boolean);
-  return parts.join(', ');
+  const name = t.species_common || t.species_botanic || 'Unknown species';
+  // For stumps and vacant sites, just read the name — no other info
+  const nameLow = name.toLowerCase();
+  const isSite  = nameLow.includes('stump') || nameLow.includes('stumps') ||
+                  nameLow.includes('vacant') || nameLow.includes('vacant site');
+  if (isSite) return name;
+  const diam  = t.diameter ? 'diameter ' + t.diameter + ' inches' : '';
+  const stems = t.stems && t.stems !== '1' ? t.stems + ' stems' : '';
+  return [name, diam, stems].filter(Boolean).join(', ');
 }
 
 // Speak a string via Web Speech API
@@ -1072,6 +1076,22 @@ function startAudioGuide() {
     // Only speak if within 5m AND not already spoken
     if (dist <= TRIGGER_METERS && !spokenTreeIds.has(treeId)) {
       spokenTreeIds.add(treeId);
+
+      // Recenter map to current position
+      map.panTo([lat, lng], { animate: true, duration: 0.6 });
+
+      // Highlight the triggered tree with a light green circle
+      const tLat = parseFloat(tree.y_lat);
+      const tLng = parseFloat(tree.x_long);
+      const highlight = L.circle([tLat, tLng], {
+        radius: 4,
+        color: '#2d6a3f', weight: 2,
+        fillColor: '#5dbd6e', fillOpacity: 0.55,
+        interactive: false
+      }).addTo(map);
+      // Auto-remove after 8 seconds so map stays clean
+      setTimeout(() => { try { map.removeLayer(highlight); } catch(e) {} }, 8000);
+
       const speech = buildSpeech(tree);
       audioLabel.textContent = tree.species_common || 'Tree nearby';
       speak(speech);
