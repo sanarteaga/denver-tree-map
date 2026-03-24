@@ -90,6 +90,16 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
 .entry-panel { width: 100%; max-width: 340px; display: none; flex-direction: column; gap: 12px; }
 .entry-panel.show { display: flex; }
 
+/* GPS CARD */
+.gps-card {
+  background: var(--surface); border: 1.5px solid var(--border);
+  border-radius: var(--r); padding: 18px 16px;
+  display: flex; align-items: center; gap: 14px;
+}
+.gps-icon { font-size: 28px; flex-shrink: 0; }
+.gps-desc { font-size: 14px; color: var(--dim); line-height: 1.5; }
+.gps-desc strong { color: var(--text); font-weight: 600; }
+
 /* INPUT */
 .field-wrap {
   background: var(--surface); border: 1.5px solid var(--border);
@@ -282,6 +292,49 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* AUDIO GUIDE BUTTON */
+#audio-btn {
+  position: absolute; right: 16px; z-index: 20;
+  bottom: calc(env(safe-area-inset-bottom, 14px) + 70px);
+  background: rgba(255,255,255,.93); border: 1px solid var(--border); border-radius: var(--r);
+  color: var(--text); width: 46px; height: 46px; display: flex; align-items: center;
+  justify-content: center; cursor: pointer; font-size: 20px;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: var(--shadow);
+  transition: bottom .35s cubic-bezier(.4,0,.2,1), background .2s, border-color .2s;
+}
+#audio-btn.up { bottom: calc(var(--sh) + env(safe-area-inset-bottom, 14px) + 70px); }
+#audio-btn.active {
+  background: rgba(45,106,63,.12); border-color: var(--accent);
+  animation: audio-ring .8s ease-in-out infinite alternate;
+}
+@keyframes audio-ring {
+  from { box-shadow: 0 0 0 0 rgba(45,106,63,.3); }
+  to   { box-shadow: 0 0 0 8px rgba(45,106,63,0); }
+}
+
+/* AUDIO STATUS PILL */
+#audio-status {
+  position: absolute; bottom: calc(env(safe-area-inset-bottom,14px) + 128px); right: 16px;
+  z-index: 20; background: var(--accent); color: #fff;
+  border-radius: 99px; padding: 6px 10px 6px 8px;
+  display: flex; align-items: center; gap: 6px;
+  font-family: "Space Mono", monospace; font-size: 11px;
+  box-shadow: var(--shadow); transition: bottom .35s cubic-bezier(.4,0,.2,1);
+  white-space: nowrap;
+}
+#audio-status.up { bottom: calc(var(--sh) + env(safe-area-inset-bottom,14px) + 128px); }
+#audio-status.gone { display: none; }
+.audio-pulse {
+  width: 8px; height: 8px; border-radius: 50%; background: #fff;
+  animation: apulse 1s ease-in-out infinite;
+  flex-shrink: 0;
+}
+@keyframes apulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.7)} }
+#audio-stop {
+  background: none; border: none; color: rgba(255,255,255,.8);
+  font-size: 13px; cursor: pointer; padding: 0 0 0 4px; line-height: 1;
+}
+
 /* GPS LOCATION DOT */
 .loc-dot-outer {
   width: 22px; height: 22px; border-radius: 50%;
@@ -307,12 +360,13 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
 <div id="entry-screen">
   <div class="entry-tree">🌳</div>
   <div class="entry-title">Denver Tree Map</div>
-  <div class="entry-sub">Search by zip code or select a neighborhood to explore every tree in that area</div>
+  <div class="entry-sub">Search by zip code, neighborhood, or use your current location</div>
 
   <!-- TAB TOGGLE -->
   <div class="tab-row">
-    <button class="tab-btn active" id="tab-zip" onclick="switchTab('zip')">📮 Zip Code</button>
+    <button class="tab-btn active" id="tab-zip" onclick="switchTab('zip')">📮 Zip</button>
     <button class="tab-btn" id="tab-nbr" onclick="switchTab('nbr')">🏘 Neighborhood</button>
+    <button class="tab-btn" id="tab-gps" onclick="switchTab('gps')">📍 Near Me</button>
   </div>
 
   <!-- ZIP PANEL -->
@@ -337,6 +391,16 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
     </div>
     <button class="go-btn" id="nbr-go" disabled>Explore Trees →</button>
     <div class="entry-err" id="nbr-err"></div>
+  </div>
+
+  <!-- GPS / NEAR ME PANEL -->
+  <div class="entry-panel" id="panel-gps">
+    <div class="gps-card">
+      <div class="gps-icon">📍</div>
+      <div class="gps-desc">Load all trees within <strong>0.5 miles</strong> of your current location</div>
+    </div>
+    <button class="go-btn" id="gps-go">Use My Location →</button>
+    <div class="entry-err" id="gps-err"></div>
   </div>
 </div>
 
@@ -404,6 +468,16 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
 
 <!-- LOCATE -->
 <button id="loc">◎</button>
+
+<!-- AUDIO GUIDE BUTTON -->
+<button id="audio-btn" title="Field Audio Guide">🎧</button>
+
+<!-- AUDIO GUIDE STATUS PILL -->
+<div id="audio-status" class="gone">
+  <span class="audio-pulse"></span>
+  <span id="audio-label">Audio Guide On</span>
+  <button id="audio-stop">✕</button>
+</div>
 
 <!-- TOAST -->
 <div id="toast"></div>
@@ -473,10 +547,13 @@ let allTrees = [], activeConds = new Set(), activeDiam = null, searchQ = '';
 function switchTab(tab) {
   document.getElementById('tab-zip').classList.toggle('active', tab==='zip');
   document.getElementById('tab-nbr').classList.toggle('active', tab==='nbr');
+  document.getElementById('tab-gps').classList.toggle('active', tab==='gps');
   document.getElementById('panel-zip').classList.toggle('show', tab==='zip');
   document.getElementById('panel-nbr').classList.toggle('show', tab==='nbr');
+  document.getElementById('panel-gps').classList.toggle('show', tab==='gps');
   document.getElementById('zip-err').textContent = '';
   document.getElementById('nbr-err').textContent = '';
+  document.getElementById('gps-err').textContent = '';
   if (tab==='zip') setTimeout(() => document.getElementById('zip-input').focus(), 100);
 }
 
@@ -595,6 +672,66 @@ nbrGo.addEventListener('click', async () => {
   }
 });
 
+// ─── GPS ENTRY HANDLER ───────────────────────────────────────────────────────
+document.getElementById('gps-go').addEventListener('click', () => {
+  const errEl = document.getElementById('gps-err');
+  errEl.textContent = '';
+  if (!navigator.geolocation) {
+    errEl.textContent = 'Geolocation not supported on this device.'; return;
+  }
+
+  const btn = document.getElementById('gps-go');
+  btn.disabled = true; btn.textContent = '…';
+  document.getElementById('load-label').textContent = 'Near Me';
+  showLoading(true); setProg(15); setMsg('Getting your location…');
+  document.getElementById('entry-screen').classList.add('gone');
+
+  navigator.geolocation.getCurrentPosition(async pos => {
+    btn.disabled = false; btn.textContent = 'Use My Location →';
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+
+    setProg(35); setMsg('Loading trees within 0.5 miles…');
+
+    // Show location dot straight away
+    showLocationDot(lat, lng, pos.coords.accuracy);
+    map.flyTo([lat, lng], 16, { animate: false });
+
+    const south = lat - RADIUS_DEG, north = lat + RADIUS_DEG;
+    const west  = lng - RADIUS_DEG, east  = lng + RADIUS_DEG;
+
+    try {
+      const where = `x_long BETWEEN '${west}' AND '${east}' AND y_lat BETWEEN '${south}' AND '${north}'`;
+      const url = `${TREE_API}?$limit=${LIMIT}&$select=species_common,species_botanic,diameter,stems,condition,site_designation,address,street,neighbor,x_long,y_lat&$where=${encodeURIComponent(where)}`;
+      setProg(60);
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`API error ${res.status}`);
+      const data = await res.json();
+      setProg(88); setMsg(`Plotting ${data.length.toLocaleString()} trees…`);
+      allTrees = data;
+      buildChips();
+      await drawMarkers(allTrees);
+      setProg(100);
+      setTimeout(() => showLoading(false), 300);
+      if (!data.length) showToast('No trees found within 0.5 miles of your location.');
+    } catch(e) {
+      showLoading(false);
+      document.getElementById('entry-screen').classList.remove('gone');
+      errEl.textContent = 'Could not load trees: ' + e.message;
+    }
+
+  }, err => {
+    btn.disabled = false; btn.textContent = 'Use My Location →';
+    showLoading(false);
+    document.getElementById('entry-screen').classList.remove('gone');
+    const msg = err.code === 1
+      ? 'Location access denied. Enable it in Settings → Safari → Location.'
+      : err.code === 2 ? 'Location unavailable. Try again outside.'
+      : 'Location request timed out.';
+    errEl.textContent = msg;
+  }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 });
+});
+
 // ─── SHARED FETCH + SHOW (zip path) ──────────────────────────────────────────
 async function fetchAndShow({ south, north, west, east }, label) {
   const where = `x_long BETWEEN '${west}' AND '${east}' AND y_lat BETWEEN '${south}' AND '${north}'`;
@@ -644,6 +781,8 @@ document.getElementById('change-area').addEventListener('click', () => {
   zipGo.textContent = 'Explore Trees →';
   nbrGo.disabled = !nbrSelect.value;
   nbrGo.textContent = 'Explore Trees →';
+  document.getElementById('gps-go').disabled = false;
+  document.getElementById('gps-go').textContent = 'Use My Location →';
   document.getElementById('zip-err').textContent = '';
   document.getElementById('nbr-err').textContent = '';
   document.getElementById('entry-screen').classList.remove('gone');
@@ -672,10 +811,10 @@ function showDetail(t) {
   document.getElementById('d-site').textContent  = t.site_designation || '—';
   document.getElementById('d-stem').textContent  = t.stems || '—';
   document.getElementById('d-atext').textContent = addr + nbr;
-  dsh.classList.add('on'); mapEl.classList.add('up'); locEl.classList.add('up');
+  dsh.classList.add('on'); mapEl.classList.add('up'); locEl.classList.add('up'); document.getElementById('audio-btn').classList.add('up'); document.getElementById('audio-status').classList.add('up');
 }
 function closeDetail() {
-  dsh.classList.remove('on'); mapEl.classList.remove('up'); locEl.classList.remove('up');
+  dsh.classList.remove('on'); mapEl.classList.remove('up'); locEl.classList.remove('up'); document.getElementById('audio-btn').classList.remove('up'); document.getElementById('audio-status').classList.remove('up');
 }
 document.getElementById('dclose').addEventListener('click', closeDetail);
 map.on('click', closeDetail);
@@ -838,6 +977,137 @@ document.getElementById('loc').addEventListener('click', () => {
               : 'Location request timed out.';
     showToast(msg, 5000);
   }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
+});
+
+// ─── AUDIO GUIDE ─────────────────────────────────────────────────────────────
+const TRIGGER_METERS = 5;           // speak when within this distance
+const EARTH_R        = 6371000;     // Earth radius in metres
+
+// Haversine distance in metres between two lat/lng points
+function haversine(lat1, lng1, lat2, lng2) {
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat/2)**2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+  return EARTH_R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// Find nearest tree to given coords from currently loaded allTrees
+function nearestTree(lat, lng) {
+  let best = null, bestDist = Infinity;
+  for (const t of allTrees) {
+    const tLat = parseFloat(t.y_lat), tLng = parseFloat(t.x_long);
+    if (isNaN(tLat) || isNaN(tLng)) continue;
+    const d = haversine(lat, lng, tLat, tLng);
+    if (d < bestDist) { bestDist = d; best = t; }
+  }
+  return best ? { tree: best, dist: bestDist } : null;
+}
+
+// Build the speech string from a tree record
+function buildSpeech(t) {
+  const name    = t.species_common  || t.species_botanic || 'Unknown species';
+  const diam    = t.diameter        ?  : '';
+  const stems   = t.stems && t.stems !== '1' ?  : '';
+  const parts   = [name, diam, stems].filter(Boolean);
+  return parts.join(', ');
+}
+
+// Speak a string via Web Speech API
+function speak(text) {
+  if (!window.speechSynthesis) return;
+  window.speechSynthesis.cancel();   // stop anything already playing
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.lang  = 'en-US';
+  utt.rate  = 0.95;
+  utt.pitch = 1.0;
+  window.speechSynthesis.speak(utt);
+}
+
+let audioGuideActive  = false;
+let audioWatchId      = null;
+const spokenTreeIds   = new Set();   // tracks trees already read — never repeat
+
+const audioBtn    = document.getElementById('audio-btn');
+const audioStatus = document.getElementById('audio-status');
+const audioLabel  = document.getElementById('audio-label');
+
+function startAudioGuide() {
+  if (!navigator.geolocation) {
+    showToast('Geolocation not supported on this device.'); return;
+  }
+  if (!window.speechSynthesis) {
+    showToast('Text-to-speech not supported on this device.'); return;
+  }
+  if (allTrees.length === 0) {
+    showToast('Load an area first before starting the audio guide.'); return;
+  }
+
+  // iOS requires speech to be triggered from a user gesture — prime it here
+  window.speechSynthesis.cancel();
+  const primer = new SpeechSynthesisUtterance('');
+  window.speechSynthesis.speak(primer);
+
+  audioGuideActive = true;
+  audioBtn.classList.add('active');
+  audioStatus.classList.remove('gone');
+  audioLabel.textContent = 'Listening…';
+
+  audioWatchId = navigator.geolocation.watchPosition(pos => {
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+
+    // Update location dot silently
+    showLocationDot(lat, lng, pos.coords.accuracy);
+
+    const result = nearestTree(lat, lng);
+    if (!result) return;
+
+    const { tree, dist } = result;
+
+    // Build a unique ID for this tree (use site coords as key)
+    const treeId = `${tree.x_long},${tree.y_lat}`;
+
+    // Only speak if within 5m AND not already spoken
+    if (dist <= TRIGGER_METERS && !spokenTreeIds.has(treeId)) {
+      spokenTreeIds.add(treeId);
+      const speech = buildSpeech(tree);
+      audioLabel.textContent = tree.species_common || 'Tree nearby';
+      speak(speech);
+    }
+
+  }, err => {
+    showToast('Location error during audio guide. Try again.');
+    stopAudioGuide();
+  }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 2000 });
+}
+
+function stopAudioGuide() {
+  audioGuideActive = false;
+  if (audioWatchId !== null) {
+    navigator.geolocation.clearWatch(audioWatchId);
+    audioWatchId = null;
+  }
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  audioBtn.classList.remove('active');
+  audioStatus.classList.add('gone');
+  audioLabel.textContent = 'Listening…';
+  // Don't clear spokenTreeIds — once read, never read again this session
+}
+
+audioBtn.addEventListener('click', () => {
+  if (audioGuideActive) stopAudioGuide();
+  else startAudioGuide();
+});
+
+document.getElementById('audio-stop').addEventListener('click', stopAudioGuide);
+
+// Also stop audio guide cleanly when user changes area
+const _origChangeArea = document.getElementById('change-area').onclick;
+document.getElementById('change-area').addEventListener('click', () => {
+  if (audioGuideActive) stopAudioGuide();
+  spokenTreeIds.clear();   // new area = fresh slate
 });
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
