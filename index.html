@@ -281,6 +281,24 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
   animation: spin .7s linear infinite; display: inline-block; vertical-align: middle;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* GPS LOCATION DOT */
+.loc-dot-outer {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(74,144,217,.22); border: 1.5px solid rgba(74,144,217,.5);
+  display: flex; align-items: center; justify-content: center;
+  animation: loc-pulse 2s ease-out infinite;
+}
+.loc-dot-inner {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #4a90d9; border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,.25);
+}
+@keyframes loc-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(74,144,217,.4); }
+  70%  { box-shadow: 0 0 0 10px rgba(74,144,217,0); }
+  100% { box-shadow: 0 0 0 0 rgba(74,144,217,0); }
+}
 </style>
 </head>
 <body>
@@ -393,7 +411,7 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
 <script>
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 const TREE_API = 'https://data.colorado.gov/resource/wz8h-dap6.json';
-const GEO_API  = 'https://nominatim.openstreetmap.org/search';
+const GEO_API  = 'https://api.zippopotam.us/us';
 const LIMIT    = 50000;
 const CENTER   = [39.7392, -104.9903];
 
@@ -512,14 +530,19 @@ async function goZip() {
     showLoading(true); setProg(10); setMsg('Looking up zip code…');
     document.getElementById('entry-screen').classList.add('gone');
 
-    const geoUrl = `${GEO_API}?postalcode=${encodeURIComponent(zip)}&country=US&format=json&limit=1`;
-    const geoRes = await fetch(geoUrl, { headers:{'User-Agent':'DenverTreeMap/1.0'} });
-    if (!geoRes.ok) throw new Error(`Geocoder error ${geoRes.status}`);
+    // Zippopotam.us: CORS-open, no auth, purpose-built for zip lookups
+    const geoUrl = `${GEO_API}/${encodeURIComponent(zip)}`;
+    const geoRes = await fetch(geoUrl);
+    if (!geoRes.ok) throw new Error(`Zip code ${zip} not found. Try another.`);
     const geoData = await geoRes.json();
-    if (!geoData.length) throw new Error(`Zip code ${zip} not found. Try another.`);
+    if (!geoData.places || !geoData.places.length) throw new Error(`Zip code ${zip} not found. Try another.`);
 
-    const [south, north, west, east] = geoData[0].boundingbox.map(parseFloat);
-    const place = geoData[0].display_name.split(',').slice(0,2).join(', ').trim();
+    const lat   = parseFloat(geoData.places[0].latitude);
+    const lng   = parseFloat(geoData.places[0].longitude);
+    const place = geoData.places[0]['place name'] + ', ' + geoData.places[0]['state abbreviation'];
+    // Build ~4-mile bounding box around zip centroid
+    const pad = 0.055;
+    const south = lat - pad, north = lat + pad, west = lng - pad, east = lng + pad;
 
     setProg(38); setMsg(`Found: ${place}\nFetching trees…`);
     await fetchAndShow({ south, north, west, east }, zip);
@@ -726,13 +749,95 @@ function applyFilters() {
   drawMarkers(filtered);
 }
 
-// ─── LOCATE ──────────────────────────────────────────────────────────────────
+// ─── GPS LOCATION ────────────────────────────────────────────────────────────
+// 0.5 miles ≈ 0.0072 degrees at Denver's latitude
+const RADIUS_DEG = 0.0072;
+
+let locationMarker = null;   // pulsing dot layer
+let locationCircle = null;   // accuracy ring
+
+function showLocationDot(lat, lng, accuracyM) {
+  // Remove previous
+  if (locationMarker) map.removeLayer(locationMarker);
+  if (locationCircle) map.removeLayer(locationCircle);
+
+  // Pulsing blue dot via divIcon
+  locationMarker = L.marker([lat, lng], {
+    icon: L.divIcon({
+      html: `<div class="loc-dot-outer"><div class="loc-dot-inner"></div></div>`,
+      className: '', iconSize: [22, 22], iconAnchor: [11, 11]
+    }),
+    zIndexOffset: 1000
+  }).addTo(map);
+
+  // Accuracy circle (subtle)
+  if (accuracyM && accuracyM < 500) {
+    locationCircle = L.circle([lat, lng], {
+      radius: accuracyM,
+      color: '#4a90d9', weight: 1,
+      fillColor: '#4a90d9', fillOpacity: 0.08
+    }).addTo(map);
+  }
+
+  // Also draw the 0.5-mile search radius ring so user can see coverage
+  L.circle([lat, lng], {
+    radius: 804,   // 0.5 miles in metres
+    color: '#2d6a3f', weight: 1.5, dashArray: '4 4',
+    fillColor: '#2d6a3f', fillOpacity: 0.04,
+    interactive: false
+  }).addTo(map);
+}
+
 document.getElementById('loc').addEventListener('click', () => {
-  if (!navigator.geolocation) return;
-  navigator.geolocation.getCurrentPosition(
-    p => map.flyTo([p.coords.latitude,p.coords.longitude], 16, {animate:true,duration:1.2}),
-    null, {enableHighAccuracy:true,timeout:8000}
-  );
+  if (!navigator.geolocation) { showToast('Geolocation not supported on this device.'); return; }
+
+  locEl.textContent = '…';
+  navigator.geolocation.getCurrentPosition(async pos => {
+    locEl.textContent = '◎';
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+
+    // Story 1: show dot
+    showLocationDot(lat, lng, pos.coords.accuracy);
+
+    // Story 2: recenter
+    map.flyTo([lat, lng], 16, { animate: true, duration: 1.0 });
+
+    // Story 3: replace view with trees within 0.5 miles
+    activeConds.clear(); activeDiam = null; searchQ = '';
+    document.getElementById('si').value = '';
+    document.getElementById('clr').style.display = 'none';
+
+    const south = lat - RADIUS_DEG, north = lat + RADIUS_DEG;
+    const west  = lng - RADIUS_DEG, east  = lng + RADIUS_DEG;
+
+    showLoading(true); setProg(20); setMsg('Loading trees near you…');
+    try {
+      const where = `x_long BETWEEN '${west}' AND '${east}' AND y_lat BETWEEN '${south}' AND '${north}'`;
+      const url = `${TREE_API}?$limit=${LIMIT}&$select=species_common,species_botanic,diameter,stems,condition,site_designation,address,street,neighbor,x_long,y_lat&$where=${encodeURIComponent(where)}`;
+      setProg(50);
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`API error ${res.status}`);
+      const data = await res.json();
+      setProg(85); setMsg(`Plotting ${data.length.toLocaleString()} trees…`);
+      allTrees = data;
+      buildChips();
+      await drawMarkers(allTrees);
+      setProg(100);
+      setTimeout(() => showLoading(false), 300);
+      if (!data.length) showToast('No trees found within 0.5 miles of your location.');
+    } catch(e) {
+      showLoading(false);
+      showToast('Could not load trees: ' + e.message);
+    }
+
+  }, err => {
+    locEl.textContent = '◎';
+    const msg = err.code === 1 ? 'Location access denied. Enable it in Settings → Safari → Location.'
+              : err.code === 2 ? 'Location unavailable. Try again.'
+              : 'Location request timed out.';
+    showToast(msg, 5000);
+  }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
 });
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
