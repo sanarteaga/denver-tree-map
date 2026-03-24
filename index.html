@@ -304,12 +304,9 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
 }
 #audio-btn.up { bottom: calc(var(--sh) + env(safe-area-inset-bottom, 14px) + 70px); }
 #audio-btn.active {
-  background: rgba(45,106,63,.12); border-color: var(--accent);
-  animation: audio-ring .8s ease-in-out infinite alternate;
-}
-@keyframes audio-ring {
-  from { box-shadow: 0 0 0 0 rgba(45,106,63,.3); }
-  to   { box-shadow: 0 0 0 8px rgba(45,106,63,0); }
+  background: #1a4d28;
+  border-color: var(--accent);
+  color: #fff;
 }
 
 /* AUDIO STATUS PILL */
@@ -364,13 +361,13 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
 
   <!-- TAB TOGGLE -->
   <div class="tab-row">
-    <button class="tab-btn active" id="tab-zip" onclick="switchTab('zip')">📮 Zip</button>
+    <button class="tab-btn active" id="tab-gps" onclick="switchTab('gps')">📍 Near Me</button>
+    <button class="tab-btn" id="tab-zip" onclick="switchTab('zip')">📮 Zip</button>
     <button class="tab-btn" id="tab-nbr" onclick="switchTab('nbr')">🏘 Neighborhood</button>
-    <button class="tab-btn" id="tab-gps" onclick="switchTab('gps')">📍 Near Me</button>
   </div>
 
   <!-- ZIP PANEL -->
-  <div class="entry-panel show" id="panel-zip">
+  <div class="entry-panel" id="panel-zip">
     <div class="field-wrap">
       <svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
         <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
@@ -394,7 +391,7 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
   </div>
 
   <!-- GPS / NEAR ME PANEL -->
-  <div class="entry-panel" id="panel-gps">
+  <div class="entry-panel show" id="panel-gps">
     <div class="gps-card">
       <div class="gps-icon">📍</div>
       <div class="gps-desc">Load all trees within <strong>0.2 miles</strong> of your current location</div>
@@ -807,7 +804,7 @@ function showDetail(t) {
   document.getElementById('d-bot').textContent   = botanic;
   document.getElementById('d-com').textContent   = common;
   document.getElementById('d-cond').innerHTML    = condDot(t.condition);
-  document.getElementById('d-diam').textContent  = t.diameter || '—';
+  document.getElementById('d-diam').textContent  = formatDiam(t.diameter || '');
   document.getElementById('d-site').textContent  = t.site_designation || '—';
   document.getElementById('d-stem').textContent  = t.stems || '—';
   document.getElementById('d-atext').textContent = addr + nbr;
@@ -835,7 +832,7 @@ function buildChips() {
     if (activeConds.has(item)) activeConds.delete(item); else activeConds.add(item);
     return activeConds.has(item);
   });
-  buildRow('diam-chips', ['0 to 6','6 to 12','12 to 18','18 to 24','24 to 30','30+'], item => {
+  buildRow('diam-chips', ['0 to 6','6 to 12','12 to 18','18 to 24','24 to 30','30 to 36','36 to 42','42 to 48','More than 48'], item => {
     activeDiam = activeDiam===item ? null : item; return activeDiam===item;
   }, true);
 }
@@ -877,11 +874,8 @@ function applyFilters() {
       if (![...activeConds].some(ac=>c.includes(ac.toLowerCase()))) return false;
     }
     if (activeDiam) {
-      if (activeDiam==='30+') {
-        const n=parseInt(t.diameter||'0'); if(isNaN(n)||n<30) return false;
-      } else {
-        if (!(t.diameter||'').includes(activeDiam.split(' to ')[0])) return false;
-      }
+      // Match using formatDiam so chip labels align with API values
+      if (formatDiam(t.diameter || '') !== activeDiam) return false;
     }
     return true;
   });
@@ -1006,6 +1000,27 @@ function nearestTree(lat, lng) {
 }
 
 // Build the speech string from a tree record
+// ─── DIAMETER DISPLAY MAPPING ────────────────────────────────────────────────
+const DIAM_MAP = {
+  '0 to 6':   '0 to 6',
+  '6 to 12':  '6 to 12',
+  '12 to 1':  '12 to 18',
+  '18 to 2':  '18 to 24',
+  '24 to 3':  '24 to 30',
+  '30 to 3':  '30 to 36',
+  '36 to 4':  '36 to 42',
+  '42 to 4':  '42 to 48',
+  '48 +':     'More than 48',
+  'N/A':      'Not available',
+  'n/a':      'Not available'
+};
+
+function formatDiam(raw) {
+  if (!raw || raw.trim() === '') return 'Not available';
+  const key = raw.trim();
+  return DIAM_MAP[key] || key;
+}
+
 function buildSpeech(t) {
   const name = t.species_common || t.species_botanic || 'Unknown species';
   // For stumps and vacant sites, just read the name — no other info
@@ -1013,7 +1028,7 @@ function buildSpeech(t) {
   const isSite  = nameLow.includes('stump') || nameLow.includes('stumps') ||
                   nameLow.includes('vacant') || nameLow.includes('vacant site');
   if (isSite) return name;
-  const diam  = t.diameter ? 'diameter ' + t.diameter + ' inches' : '';
+  const diam  = t.diameter ? 'diameter ' + formatDiam(t.diameter) : '';
   const stems = t.stems && t.stems !== '1' ? t.stems + ' stems' : '';
   return [name, diam, stems].filter(Boolean).join(', ');
 }
