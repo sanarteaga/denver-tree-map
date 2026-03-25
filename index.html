@@ -298,6 +298,23 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* JOGGING MODE BUTTON */
+#jog-btn {
+  position: absolute; right: 16px; z-index: 20;
+  bottom: calc(env(safe-area-inset-bottom, 14px) + 124px);
+  background: rgba(255,255,255,.93); border: 1px solid var(--border); border-radius: var(--r);
+  color: var(--text); width: 46px; height: 46px; display: flex; align-items: center;
+  justify-content: center; cursor: pointer; font-size: 20px;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: var(--shadow);
+  transition: bottom .35s cubic-bezier(.4,0,.2,1), background .2s, border-color .2s;
+}
+#jog-btn.up { bottom: calc(var(--sh) + env(safe-area-inset-bottom, 14px) + 124px); }
+#jog-btn.active {
+  background: #1a3d6e;
+  border-color: #4a90d9;
+  color: #fff;
+}
+
 /* AUDIO GUIDE BUTTON */
 #audio-btn {
   position: absolute; right: 16px; z-index: 20;
@@ -317,7 +334,7 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
 
 /* AUDIO STATUS PILL */
 #audio-status {
-  position: absolute; bottom: calc(env(safe-area-inset-bottom,14px) + 128px); right: 16px;
+  position: absolute; bottom: calc(env(safe-area-inset-bottom,14px) + 182px); right: 16px;
   z-index: 20; background: var(--accent); color: #fff;
   border-radius: 99px; padding: 6px 10px 6px 8px;
   display: flex; align-items: center; gap: 6px;
@@ -325,7 +342,7 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
   box-shadow: var(--shadow); transition: bottom .35s cubic-bezier(.4,0,.2,1);
   white-space: nowrap;
 }
-#audio-status.up { bottom: calc(var(--sh) + env(safe-area-inset-bottom,14px) + 128px); }
+#audio-status.up { bottom: calc(var(--sh) + env(safe-area-inset-bottom,14px) + 182px); }
 #audio-status.gone { display: none; }
 .audio-pulse {
   width: 8px; height: 8px; border-radius: 50%; background: #fff;
@@ -472,6 +489,9 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
 
 <!-- LOCATE -->
 <button id="loc">◎</button>
+
+<!-- JOGGING MODE BUTTON -->
+<button id="jog-btn" title="Jogging Mode">🏃</button>
 
 <!-- AUDIO GUIDE BUTTON -->
 <button id="audio-btn" title="Field Audio Guide">🎧</button>
@@ -713,6 +733,7 @@ document.getElementById('gps-go').addEventListener('click', () => {
       const data = await res.json();
       setProg(88); setMsg(`Plotting ${data.length.toLocaleString()} trees…`);
       allTrees = data;
+      nearMeCenter = { lat, lng };  // store center for auto-reload
       buildChips();
       await drawMarkers(allTrees);
       setProg(100);
@@ -776,6 +797,54 @@ function fitToTrees() {
 }
 
 // ─── CHANGE AREA ─────────────────────────────────────────────────────────────
+// ─── AUTO-RELOAD NEAR ME (every 30 sec when audio is active) ─────────────────
+// 0.03 miles = ~48 metres — reload when user is this close to edge of loaded area
+const RELOAD_BOUNDARY_DEG = 0.03 * 0.01449; // 0.03 miles in degrees ≈ 0.000435
+let   autoReloadTimer = null;
+let   nearMeCenter    = null;   // {lat, lng} of the last Near Me load center
+
+function startAutoReload() {
+  if (autoReloadTimer) return;
+  autoReloadTimer = setInterval(checkBoundaryAndReload, 30000); // every 30 sec
+}
+function stopAutoReload() {
+  if (autoReloadTimer) { clearInterval(autoReloadTimer); autoReloadTimer = null; }
+}
+
+async function checkBoundaryAndReload() {
+  if (!nearMeCenter) return;
+  if (!navigator.geolocation) return;
+
+  navigator.geolocation.getCurrentPosition(async pos => {
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+    const distFromCenterDeg = Math.sqrt(
+      Math.pow(lat - nearMeCenter.lat, 2) + Math.pow(lng - nearMeCenter.lng, 2)
+    );
+    // If within 0.03 miles of the edge (i.e. RADIUS_DEG - 0.000435 from center)
+    const edgeDeg = RADIUS_DEG - RELOAD_BOUNDARY_DEG;
+    if (distFromCenterDeg >= edgeDeg) {
+      // Reload trees centered on new position
+      nearMeCenter = { lat, lng };
+      const south = lat - RADIUS_DEG, north = lat + RADIUS_DEG;
+      const west  = lng - RADIUS_DEG, east  = lng + RADIUS_DEG;
+      try {
+        const where = `x_long BETWEEN '${west}' AND '${east}' AND y_lat BETWEEN '${south}' AND '${north}'`;
+        const url = `${TREE_API}?$limit=${LIMIT}&$select=species_common,species_botanic,diameter,stems,condition,site_designation,address,street,neighbor,x_long,y_lat&$where=${encodeURIComponent(where)}`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!Array.isArray(data) || !data.length) return;
+        allTrees = data;
+        spokenTreeIds.clear();   // fresh slate for new area
+        buildChips();
+        await drawMarkers(allTrees);
+        showToast('Trees refreshed for your new location.');
+      } catch(e) { /* silent — non-critical background reload */ }
+    }
+  }, null, { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 });
+}
+
 document.getElementById('change-area').addEventListener('click', () => {
   activeConds.clear(); activeDiam = null; searchQ = '';
   document.getElementById('si').value = '';
@@ -815,10 +884,10 @@ function showDetail(t) {
   document.getElementById('d-site').textContent  = t.site_designation || '—';
   document.getElementById('d-stem').textContent  = t.stems || '—';
   document.getElementById('d-atext').textContent = addr + nbr;
-  dsh.classList.add('on'); mapEl.classList.add('up'); locEl.classList.add('up'); document.getElementById('audio-btn').classList.add('up'); document.getElementById('audio-status').classList.add('up');
+  dsh.classList.add('on'); mapEl.classList.add('up'); locEl.classList.add('up'); document.getElementById('audio-btn').classList.add('up'); document.getElementById('jog-btn').classList.add('up'); document.getElementById('audio-status').classList.add('up');
 }
 function closeDetail() {
-  dsh.classList.remove('on'); mapEl.classList.remove('up'); locEl.classList.remove('up'); document.getElementById('audio-btn').classList.remove('up'); document.getElementById('audio-status').classList.remove('up');
+  dsh.classList.remove('on'); mapEl.classList.remove('up'); locEl.classList.remove('up'); document.getElementById('audio-btn').classList.remove('up'); document.getElementById('jog-btn').classList.remove('up'); document.getElementById('audio-status').classList.remove('up');
 }
 document.getElementById('dclose').addEventListener('click', closeDetail);
 map.on('click', closeDetail);
@@ -955,6 +1024,7 @@ document.getElementById('loc').addEventListener('click', () => {
       const data = await res.json();
       setProg(85); setMsg(`Plotting ${data.length.toLocaleString()} trees…`);
       allTrees = data;
+      nearMeCenter = { lat, lng };  // store center for auto-reload
       buildChips();
       await drawMarkers(allTrees);
       setProg(100);
@@ -1073,6 +1143,7 @@ function startAudioGuide() {
   audioBtn.classList.add('active');
   audioStatus.classList.remove('gone');
   audioLabel.textContent = 'Listening…';
+  startAutoReload();
 
   audioWatchId = navigator.geolocation.watchPosition(pos => {
     const lat = pos.coords.latitude;
@@ -1127,8 +1198,9 @@ function stopAudioGuide() {
   }
   if (window.speechSynthesis) window.speechSynthesis.cancel();
   audioBtn.classList.remove('active');
-  audioStatus.classList.add('gone');
+  if (!joggingModeActive) audioStatus.classList.add('gone');
   audioLabel.textContent = 'Listening…';
+  stopAutoReload();
   // Don't clear spokenTreeIds — once read, never read again this session
 }
 
@@ -1141,9 +1213,139 @@ document.getElementById('audio-stop').addEventListener('click', stopAudioGuide);
 
 // Also stop audio guide cleanly when user changes area
 const _origChangeArea = document.getElementById('change-area').onclick;
+// ─── AUTO-RELOAD NEAR ME (every 30 sec when audio is active) ─────────────────
+// 0.03 miles = ~48 metres — reload when user is this close to edge of loaded area
 document.getElementById('change-area').addEventListener('click', () => {
   if (audioGuideActive) stopAudioGuide();
   spokenTreeIds.clear();   // new area = fresh slate
+  nearMeCenter = null;
+});
+
+// ─── JOGGING MODE ────────────────────────────────────────────────────────────
+// 9 min/mile = 2.98 m/s. 3 sec ahead = ~8.94 m projected forward.
+const JOG_SPEED_MS   = 2.98;   // metres per second (9 min/mile)
+const JOG_LOOKAHEAD  = 3.0;    // seconds to project ahead
+const JOG_PROJ_M     = JOG_SPEED_MS * JOG_LOOKAHEAD;  // ~8.94 m
+
+let joggingModeActive = false;
+let jogWatchId        = null;
+let lastJogPos        = null;   // previous GPS fix for bearing calculation
+
+const jogBtn = document.getElementById('jog-btn');
+
+// Project a lat/lng by distance (metres) in a given bearing (degrees)
+function projectPoint(lat, lng, bearingDeg, distM) {
+  const R     = 6371000;
+  const d     = distM / R;
+  const brRad = bearingDeg * Math.PI / 180;
+  const lat1  = lat  * Math.PI / 180;
+  const lng1  = lng  * Math.PI / 180;
+  const lat2  = Math.asin(Math.sin(lat1)*Math.cos(d) + Math.cos(lat1)*Math.sin(d)*Math.cos(brRad));
+  const lng2  = lng1 + Math.atan2(Math.sin(brRad)*Math.sin(d)*Math.cos(lat1), Math.cos(d) - Math.sin(lat1)*Math.sin(lat2));
+  return { lat: lat2 * 180 / Math.PI, lng: lng2 * 180 / Math.PI };
+}
+
+// Bearing from point A to point B (degrees 0–360)
+function bearingTo(lat1, lng1, lat2, lng2) {
+  const toRad = d => d * Math.PI / 180;
+  const dLng  = toRad(lng2 - lng1);
+  const y     = Math.sin(dLng) * Math.cos(toRad(lat2));
+  const x     = Math.cos(toRad(lat1))*Math.sin(toRad(lat2)) - Math.sin(toRad(lat1))*Math.cos(toRad(lat2))*Math.cos(dLng);
+  return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
+}
+
+function startJoggingMode() {
+  if (!navigator.geolocation) { showToast('Geolocation not supported.'); return; }
+  if (!window.speechSynthesis) { showToast('Text-to-speech not supported.'); return; }
+  if (allTrees.length === 0)   { showToast('Load an area first before starting Jogging Mode.'); return; }
+
+  // Jogging mode overrides audio guide — stop it if running
+  if (audioGuideActive) stopAudioGuide();
+
+  // Prime iOS speech
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(new SpeechSynthesisUtterance(''));
+
+  joggingModeActive = true;
+  lastJogPos = null;
+  jogBtn.classList.add('active');
+  audioStatus.classList.remove('gone');  // reuse status pill
+  audioLabel.textContent = 'Jogging…';
+
+  startAutoReload();
+
+  jogWatchId = navigator.geolocation.watchPosition(pos => {
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+
+    showLocationDot(lat, lng, pos.coords.accuracy);
+
+    // Need at least 2 fixes to compute bearing
+    if (!lastJogPos) {
+      lastJogPos = { lat, lng };
+      return;
+    }
+
+    // Compute heading from last position to current
+    const bearing = bearingTo(lastJogPos.lat, lastJogPos.lng, lat, lng);
+    lastJogPos = { lat, lng };
+
+    // Project position JOG_LOOKAHEAD seconds ahead
+    const projected = projectPoint(lat, lng, bearing, JOG_PROJ_M);
+
+    // Find nearest tree to projected position
+    const result = nearestTree(projected.lat, projected.lng);
+    if (!result) return;
+
+    const { tree, dist } = result;
+    const treeId = `${tree.x_long},${tree.y_lat}`;
+
+    // Trigger if projected position is within 5m of tree AND not already spoken
+    if (dist <= TRIGGER_METERS && !spokenTreeIds.has(treeId)) {
+      spokenTreeIds.add(treeId);
+
+      map.panTo([lat, lng], { animate: true, duration: 0.6 });
+
+      // Highlight tree
+      const tLat = parseFloat(tree.y_lat), tLng = parseFloat(tree.x_long);
+      const hl = L.circle([tLat, tLng], {
+        radius: 4, color: '#2d6a3f', weight: 2,
+        fillColor: '#5dbd6e', fillOpacity: 0.55, interactive: false
+      }).addTo(map);
+      setTimeout(() => { try { map.removeLayer(hl); } catch(e) {} }, 8000);
+
+      const speech = buildSpeech(tree);
+      audioLabel.textContent = tree.species_common || 'Tree ahead';
+      speak(speech);
+    }
+
+  }, err => {
+    showToast('Location error in Jogging Mode. Try again.');
+    stopJoggingMode();
+  }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 1000 });
+}
+
+function stopJoggingMode() {
+  joggingModeActive = false;
+  if (jogWatchId !== null) {
+    navigator.geolocation.clearWatch(jogWatchId);
+    jogWatchId = null;
+  }
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  jogBtn.classList.remove('active');
+  // Only hide status pill if audio guide is also off
+  if (!audioGuideActive) audioStatus.classList.add('gone');
+  stopAutoReload();
+}
+
+jogBtn.addEventListener('click', () => {
+  if (joggingModeActive) stopJoggingMode();
+  else startJoggingMode();
+});
+
+// Stop jogging mode on area change
+document.getElementById('change-area').addEventListener('click', () => {
+  if (joggingModeActive) stopJoggingMode();
 });
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
