@@ -867,6 +867,8 @@ const dsh = document.getElementById('dsh');
 const mapEl = document.getElementById('map');
 const locEl = document.getElementById('loc');
 
+let detailHighlight = null;   // green circle shown when detail sheet is open
+
 function showDetail(t) {
   const common  = t.species_common  || '—';
   const botanic = t.species_botanic || '—';
@@ -885,9 +887,23 @@ function showDetail(t) {
   document.getElementById('d-stem').textContent  = t.stems || '—';
   document.getElementById('d-atext').textContent = addr + nbr;
   dsh.classList.add('on'); mapEl.classList.add('up'); locEl.classList.add('up'); document.getElementById('audio-btn').classList.add('up'); document.getElementById('jog-btn').classList.add('up'); document.getElementById('audio-status').classList.add('up');
+
+  // Green highlight circle on the tapped tree — stays until sheet closes
+  const tLat = parseFloat(t.y_lat), tLng = parseFloat(t.x_long);
+  if (!isNaN(tLat) && !isNaN(tLng)) {
+    if (detailHighlight) { try { map.removeLayer(detailHighlight); } catch(e) {} }
+    detailHighlight = L.circle([tLat, tLng], {
+      radius: 4,
+      color: '#2d6a3f', weight: 2,
+      fillColor: '#5dbd6e', fillOpacity: 0.55,
+      interactive: false
+    }).addTo(map);
+  }
 }
 function closeDetail() {
   dsh.classList.remove('on'); mapEl.classList.remove('up'); locEl.classList.remove('up'); document.getElementById('audio-btn').classList.remove('up'); document.getElementById('jog-btn').classList.remove('up'); document.getElementById('audio-status').classList.remove('up');
+  // Remove highlight circle when sheet closes
+  if (detailHighlight) { try { map.removeLayer(detailHighlight); } catch(e) {} detailHighlight = null; }
 }
 document.getElementById('dclose').addEventListener('click', closeDetail);
 map.on('click', closeDetail);
