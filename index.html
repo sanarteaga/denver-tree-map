@@ -9,6 +9,7 @@
 
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
@@ -372,6 +373,26 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
   70%  { box-shadow: 0 0 0 10px rgba(74,144,217,0); }
   100% { box-shadow: 0 0 0 0 rgba(74,144,217,0); }
 }
+
+/* COMPASS / HEADING BUTTON */
+#compass-btn {
+  position: absolute; right: 12px; z-index: 20;
+  top: calc(env(safe-area-inset-top, 14px) + 58px);
+  background: rgba(255,255,255,.93); border: 1px solid var(--border); border-radius: var(--r);
+  width: 46px; height: 46px; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow); transition: background .2s, border-color .2s;
+  padding: 0;
+}
+#compass-btn.active {
+  background: #fff;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(45,106,63,.25), var(--shadow);
+}
+#compass-needle {
+  transform-origin: 50% 50%;
+  transition: transform 0.15s linear;
+}
 </style>
 </head>
 <body>
@@ -487,6 +508,18 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
   </div>
 </div>
 
+<!-- COMPASS / HEADING BUTTON -->
+<button id="compass-btn" title="Toggle heading mode">
+  <svg id="compass-needle" viewBox="0 0 24 24" width="22" height="22" fill="none">
+    <!-- North needle: red -->
+    <polygon points="12,3 10,13 14,13" fill="#c0392b"/>
+    <!-- South needle: gray -->
+    <polygon points="12,21 10,11 14,11" fill="#bbb"/>
+    <!-- Center dot -->
+    <circle cx="12" cy="12" r="1.5" fill="#555"/>
+  </svg>
+</button>
+
 <!-- LOCATE -->
 <button id="loc">◎</button>
 
@@ -514,7 +547,7 @@ const LIMIT    = 50000;
 const CENTER   = [39.7392, -104.9903];
 
 // ─── MAP ─────────────────────────────────────────────────────────────────────
-const map = L.map('map', { zoomControl: false, attributionControl: true, maxZoom: 19 })
+const map = L.map('map', { zoomControl: false, attributionControl: true, maxZoom: 19, rotate: true, bearing: 0, doubleClickZoom: true })
              .setView(CENTER, 13);
 
 // CARTO Positron: light, clean, excellent street names, no referer requirement
@@ -1362,6 +1395,84 @@ jogBtn.addEventListener('click', () => {
 // Stop jogging mode on area change
 document.getElementById('change-area').addEventListener('click', () => {
   if (joggingModeActive) stopJoggingMode();
+});
+
+// ─── HEADING MODE ────────────────────────────────────────────────────────────
+let headingModeActive = false;
+let headingPosWatch   = null;   // watchPosition for auto-centering
+
+const compassBtn    = document.getElementById('compass-btn');
+const compassNeedle = document.getElementById('compass-needle');
+
+function onDeviceOrientation(e) {
+  // iOS: webkitCompassHeading (0–360, clockwise from true north)
+  // Android: alpha (0–360, counterclockwise) — convert to clockwise
+  const heading = (e.webkitCompassHeading != null)
+    ? e.webkitCompassHeading
+    : (360 - (e.alpha || 0)) % 360;
+
+  // Rotate map: your heading direction goes to the top
+  if (map.setBearing) map.setBearing(heading);
+
+  // Counter-rotate the needle so it always points to true north
+  // e.g. facing east (90°) → needle rotates -90° to point left = north
+  compassNeedle.style.transform = `rotate(${-heading}deg)`;
+}
+
+function activateHeadingMode() {
+  headingModeActive = true;
+  compassBtn.classList.add('active');
+
+  window.addEventListener('deviceorientation', onDeviceOrientation, true);
+
+  // Auto-center: watch position and keep map locked to user
+  if (navigator.geolocation) {
+    headingPosWatch = navigator.geolocation.watchPosition(pos => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      showLocationDot(lat, lng, pos.coords.accuracy);
+      // setView without animation for smooth continuous tracking
+      map.setView([lat, lng], map.getZoom(), { animate: false, noMoveStart: true });
+    }, null, { enableHighAccuracy: true, timeout: 10000, maximumAge: 1000 });
+  }
+}
+
+function startHeadingMode() {
+  // iOS 13+ requires explicit permission for DeviceOrientationEvent
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission()
+      .then(state => {
+        if (state === 'granted') activateHeadingMode();
+        else showToast('Motion permission denied — cannot activate heading mode.');
+      })
+      .catch(() => showToast('Could not request motion permission.'));
+  } else {
+    activateHeadingMode();
+  }
+}
+
+function stopHeadingMode() {
+  headingModeActive = false;
+  window.removeEventListener('deviceorientation', onDeviceOrientation, true);
+  if (headingPosWatch !== null) {
+    navigator.geolocation.clearWatch(headingPosWatch);
+    headingPosWatch = null;
+  }
+  // Snap back to north-up
+  if (map.setBearing) map.setBearing(0);
+  compassNeedle.style.transform = 'rotate(0deg)';
+  compassBtn.classList.remove('active');
+}
+
+compassBtn.addEventListener('click', () => {
+  if (headingModeActive) stopHeadingMode();
+  else startHeadingMode();
+});
+
+// Stop heading mode on area change
+document.getElementById('change-area').addEventListener('click', () => {
+  if (headingModeActive) stopHeadingMode();
 });
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
