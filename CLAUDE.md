@@ -272,8 +272,8 @@ Typical flow:
 1. Santiago writes a user story ("As a user I want...")
 2. Claude may ask 1–2 clarifying questions for ambiguous UX decisions (especially for new interactive features)
 3. Claude may research competitive behavior if explicitly requested ("check Google Maps for this")
-4. Claude edits the local file, runs syntax check, verifies all changes landed with grep-based checks, and presents the file
-5. Santiago field-tests, reports back
+4. Claude edits `index.html` in place, runs the syntax check, verifies all changes landed with grep-based checks, then commits and pushes
+5. Santiago field-tests on the live GitHub Pages URL, reports back
 
 ## 9. Known Quirks & Gotchas
 
